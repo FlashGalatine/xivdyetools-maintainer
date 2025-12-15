@@ -7,6 +7,24 @@ import type { Dye, LocaleData, LocaleCode, WriteResult } from '@/types'
 const SERVER_BASE = 'http://localhost:3001/api'
 
 /**
+ * Get the API key from environment variable
+ * This is required for write operations (POST/PUT/DELETE)
+ */
+function getApiKey(): string {
+  return import.meta.env.VITE_MAINTAINER_API_KEY || ''
+}
+
+/**
+ * Create headers for mutation requests (includes API key)
+ */
+function getMutationHeaders(): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    'X-API-Key': getApiKey(),
+  }
+}
+
+/**
  * Check if the server is running
  */
 export async function checkServerHealth(): Promise<boolean> {
@@ -36,7 +54,7 @@ export async function readColorsJson(): Promise<Dye[]> {
 export async function writeColorsJson(dyes: Dye[]): Promise<WriteResult> {
   const response = await fetch(`${SERVER_BASE}/colors`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getMutationHeaders(),
     body: JSON.stringify(dyes),
   })
   return response.json()
@@ -62,7 +80,7 @@ export async function writeLocaleJson(
 ): Promise<WriteResult> {
   const response = await fetch(`${SERVER_BASE}/locale/${locale}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getMutationHeaders(),
     body: JSON.stringify(data),
   })
   return response.json()

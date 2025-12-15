@@ -1,13 +1,26 @@
 /**
  * Express server for file operations
  * Handles reading/writing to xivdyetools-core data files
+ *
+ * SECURITY: This is a development-only tool. Do NOT deploy to production.
  */
 
-import express from 'express'
+import express, { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
+
+// ============================================================================
+// SECURITY: Production Environment Guard
+// ============================================================================
+if (process.env.NODE_ENV === 'production') {
+  console.error('╔══════════════════════════════════════════════════════════════╗')
+  console.error('║  ERROR: Maintainer service must NOT run in production!       ║')
+  console.error('║  This tool is for local development only.                    ║')
+  console.error('╚══════════════════════════════════════════════════════════════╝')
+  process.exit(1)
+}
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -15,6 +28,44 @@ const __dirname = path.dirname(__filename)
 const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
+
+// ============================================================================
+// SECURITY: API Key Authentication Middleware
+// ============================================================================
+const API_KEY = process.env.MAINTAINER_API_KEY
+
+/**
+ * Middleware to require API key for mutation (POST/PUT/DELETE) requests
+ */
+function requireApiKey(req: Request, res: Response, next: NextFunction): void {
+  // Skip authentication for GET requests (read-only)
+  if (req.method === 'GET') {
+    next()
+    return
+  }
+
+  // Require API key for mutations
+  if (!API_KEY) {
+    console.warn('⚠️  WARNING: MAINTAINER_API_KEY not set. Write operations disabled.')
+    res.status(503).json({
+      success: false,
+      error: 'Service not configured. Set MAINTAINER_API_KEY environment variable.',
+    })
+    return
+  }
+
+  const providedKey = req.headers['x-api-key']
+  if (providedKey !== API_KEY) {
+    console.warn(`🚫 Unauthorized API request to ${req.method} ${req.path}`)
+    res.status(401).json({ success: false, error: 'Unauthorized' })
+    return
+  }
+
+  next()
+}
+
+// Apply API key middleware to all /api routes
+app.use('/api', requireApiKey)
 
 // Path to xivdyetools-core (sibling directory)
 const CORE_PATH = path.resolve(__dirname, '../../xivdyetools-core')
