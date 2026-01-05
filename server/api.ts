@@ -14,6 +14,8 @@ import { DyeArraySchema, LocaleDataSchema } from './schemas.js'
 import { validateBody } from './middleware/validation.js'
 import { requireAuth, sessionManager } from './middleware/auth.js'
 import { validateBasePaths, validateFilePath } from './utils/pathValidation.js'
+import { globalLimiter, writeLimiter, sessionLimiter } from './middleware/rateLimiting.js'
+import { requestTimeout } from './middleware/timeout.js'
 
 // ============================================================================
 // SECURITY: Production Environment Guard
@@ -30,6 +32,18 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
+
+// ============================================================================
+// SECURITY: Request Timeout Middleware
+// ============================================================================
+// Apply timeout FIRST to prevent hung connections (30s timeout)
+app.use(requestTimeout)
+
+// ============================================================================
+// SECURITY: Global Rate Limiting
+// ============================================================================
+// Apply global rate limiter to all endpoints (1000 requests / 15 minutes)
+app.use(globalLimiter)
 
 // SECURITY: Restrict CORS to localhost only
 app.use(
@@ -73,7 +87,8 @@ app.get('/api/health', (req, res) => {
 })
 
 // POST /api/auth/session - Create new session token
-app.post('/api/auth/session', (req, res) => {
+// SECURITY: Rate limit session creation to prevent token spam (10 requests / 15 minutes)
+app.post('/api/auth/session', sessionLimiter, (req, res) => {
   const token = sessionManager.generateSession()
   res.json({ success: true, token })
 })
@@ -90,8 +105,9 @@ app.get('/api/colors', async (req, res) => {
 })
 
 // POST /api/colors - Write colors_xiv.json
+// SECURITY: Rate limit write operations (30 requests / 1 minute)
 // SECURITY: Input validation with Zod schema
-app.post('/api/colors', validateBody(DyeArraySchema), async (req, res) => {
+app.post('/api/colors', writeLimiter, validateBody(DyeArraySchema), async (req, res) => {
   try {
     await writeJsonFile(COLORS_PATH, req.body)
     res.json({ success: true })
@@ -127,8 +143,9 @@ app.get('/api/locale/:code', async (req, res) => {
 })
 
 // POST /api/locale/:code - Write locale JSON file
+// SECURITY: Rate limit write operations (30 requests / 1 minute)
 // SECURITY: Input validation with Zod schema
-app.post('/api/locale/:code', validateBody(LocaleDataSchema), async (req, res) => {
+app.post('/api/locale/:code', writeLimiter, validateBody(LocaleDataSchema), async (req, res) => {
   const { code } = req.params
   const validCodes = ['en', 'ja', 'de', 'fr', 'ko', 'zh']
 

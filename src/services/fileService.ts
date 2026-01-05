@@ -3,6 +3,7 @@
  */
 
 import type { Dye, LocaleData, LocaleCode, WriteResult } from '@/types'
+import { fetchWithTimeout } from '@/utils/fetchWithTimeout'
 
 const SERVER_BASE = 'http://localhost:3001/api'
 
@@ -25,9 +26,13 @@ async function getSessionToken(): Promise<string> {
 
   // Request a new session token from the server
   try {
-    const response = await fetch(`${SERVER_BASE}/auth/session`, {
-      method: 'POST',
-    })
+    const response = await fetchWithTimeout(
+      `${SERVER_BASE}/auth/session`,
+      {
+        method: 'POST',
+      },
+      15000 // 15s timeout
+    )
 
     if (!response.ok) {
       throw new Error('Failed to create session')
@@ -58,7 +63,7 @@ function getMutationHeaders(): HeadersInit {
  */
 export async function checkServerHealth(): Promise<boolean> {
   try {
-    const response = await fetch(`${SERVER_BASE}/health`)
+    const response = await fetchWithTimeout(`${SERVER_BASE}/health`, {}, 15000)
     const data = await response.json()
 
     if (data.status === 'ok') {
@@ -77,7 +82,7 @@ export async function checkServerHealth(): Promise<boolean> {
  * Read colors_xiv.json
  */
 export async function readColorsJson(): Promise<Dye[]> {
-  const response = await fetch(`${SERVER_BASE}/colors`)
+  const response = await fetchWithTimeout(`${SERVER_BASE}/colors`, {}, 15000)
   if (!response.ok) {
     throw new Error('Failed to read colors file')
   }
@@ -88,11 +93,15 @@ export async function readColorsJson(): Promise<Dye[]> {
  * Write colors_xiv.json
  */
 export async function writeColorsJson(dyes: Dye[]): Promise<WriteResult> {
-  const response = await fetch(`${SERVER_BASE}/colors`, {
-    method: 'POST',
-    headers: getMutationHeaders(),
-    body: JSON.stringify(dyes),
-  })
+  const response = await fetchWithTimeout(
+    `${SERVER_BASE}/colors`,
+    {
+      method: 'POST',
+      headers: getMutationHeaders(),
+      body: JSON.stringify(dyes),
+    },
+    30000 // 30s timeout for file write operations
+  )
   return response.json()
 }
 
@@ -100,7 +109,7 @@ export async function writeColorsJson(dyes: Dye[]): Promise<WriteResult> {
  * Read a locale JSON file
  */
 export async function readLocaleJson(locale: LocaleCode): Promise<LocaleData> {
-  const response = await fetch(`${SERVER_BASE}/locale/${locale}`)
+  const response = await fetchWithTimeout(`${SERVER_BASE}/locale/${locale}`, {}, 15000)
   if (!response.ok) {
     throw new Error(`Failed to read locale file: ${locale}`)
   }
@@ -114,11 +123,15 @@ export async function writeLocaleJson(
   locale: LocaleCode,
   data: LocaleData
 ): Promise<WriteResult> {
-  const response = await fetch(`${SERVER_BASE}/locale/${locale}`, {
-    method: 'POST',
-    headers: getMutationHeaders(),
-    body: JSON.stringify(data),
-  })
+  const response = await fetchWithTimeout(
+    `${SERVER_BASE}/locale/${locale}`,
+    {
+      method: 'POST',
+      headers: getMutationHeaders(),
+      body: JSON.stringify(data),
+    },
+    30000 // 30s timeout for file write operations
+  )
   return response.json()
 }
 
@@ -126,7 +139,7 @@ export async function writeLocaleJson(
  * Check if an item ID already exists
  */
 export async function checkDuplicateItemId(itemId: number): Promise<boolean> {
-  const response = await fetch(`${SERVER_BASE}/validate/${itemId}`)
+  const response = await fetchWithTimeout(`${SERVER_BASE}/validate/${itemId}`, {}, 15000)
   if (!response.ok) {
     throw new Error('Failed to validate item ID')
   }
@@ -138,7 +151,7 @@ export async function checkDuplicateItemId(itemId: number): Promise<boolean> {
  * Get all locale labels (for prefix stripping)
  */
 export async function getLocaleLabels(): Promise<Record<string, string>> {
-  const response = await fetch(`${SERVER_BASE}/locales/labels`)
+  const response = await fetchWithTimeout(`${SERVER_BASE}/locales/labels`, {}, 15000)
   if (!response.ok) {
     throw new Error('Failed to get locale labels')
   }

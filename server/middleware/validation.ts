@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
+import { sanitizeZodError } from './errorSanitizer.js'
 
 /**
  * Express middleware for validating request bodies using Zod schemas
@@ -22,18 +23,31 @@ export function validateBody(schema: z.ZodSchema) {
     } catch (error) {
       // Handle Zod validation errors
       if (error instanceof z.ZodError) {
-        console.warn('🚫 Validation error:', error.errors)
+        // SECURITY: Log detailed error server-side for debugging
+        console.warn('🚫 Validation error:', {
+          path: req.path,
+          method: req.method,
+          ip: req.ip,
+          errors: error.errors, // Full error details in logs
+        })
+
+        // SECURITY: Send sanitized errors to client (no user input exposure)
+        const sanitizedErrors = sanitizeZodError(error)
+
         res.status(400).json({
           success: false,
           error: 'Validation failed',
-          details: error.errors.map((err) => ({
-            path: err.path.join('.'),
-            message: err.message,
-          })),
+          details: sanitizedErrors, // Safe for client
         })
       } else {
         // Handle unexpected errors
-        console.error('❌ Unexpected validation error:', error)
+        // SECURITY: Log details server-side, send generic message to client
+        console.error('❌ Unexpected validation error:', {
+          path: req.path,
+          method: req.method,
+          error,
+        })
+
         res.status(500).json({
           success: false,
           error: 'Internal server error',
