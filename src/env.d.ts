@@ -2,10 +2,11 @@
 
 /**
  * Environment variable type definitions
+ * Note: No environment variables are currently required for the frontend.
+ * Authentication is handled via session tokens obtained from the server.
  */
 interface ImportMetaEnv {
-  /** API key for authenticating write operations to the maintainer server */
-  readonly VITE_MAINTAINER_API_KEY: string
+  // No frontend environment variables needed
 }
 
 interface ImportMeta {

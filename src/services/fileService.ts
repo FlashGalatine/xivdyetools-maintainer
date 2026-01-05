@@ -7,31 +7,67 @@ import type { Dye, LocaleData, LocaleCode, WriteResult } from '@/types'
 const SERVER_BASE = 'http://localhost:3001/api'
 
 /**
- * Get the API key from environment variable
- * This is required for write operations (POST/PUT/DELETE)
+ * Session token for authentication
+ * Stored in memory only (not persisted)
+ * Obtained from POST /api/auth/session on server health check
  */
-function getApiKey(): string {
-  return import.meta.env.VITE_MAINTAINER_API_KEY || ''
+let sessionToken: string | null = null
+
+/**
+ * Get or create a session token
+ * @returns Session token for authentication
+ */
+async function getSessionToken(): Promise<string> {
+  // Return cached token if available
+  if (sessionToken) {
+    return sessionToken
+  }
+
+  // Request a new session token from the server
+  try {
+    const response = await fetch(`${SERVER_BASE}/auth/session`, {
+      method: 'POST',
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to create session')
+    }
+
+    const data = await response.json()
+    sessionToken = data.token
+    return sessionToken
+  } catch (error) {
+    console.error('Failed to get session token:', error)
+    throw error
+  }
 }
 
 /**
- * Create headers for mutation requests (includes API key)
+ * Create headers for mutation requests (includes session token)
  */
 function getMutationHeaders(): HeadersInit {
   return {
     'Content-Type': 'application/json',
-    'X-API-Key': getApiKey(),
+    'X-Session-Token': sessionToken!,
   }
 }
 
 /**
  * Check if the server is running
+ * Also establishes a session for authenticated mutations
  */
 export async function checkServerHealth(): Promise<boolean> {
   try {
     const response = await fetch(`${SERVER_BASE}/health`)
     const data = await response.json()
-    return data.status === 'ok'
+
+    if (data.status === 'ok') {
+      // Establish session on successful health check
+      await getSessionToken()
+      return true
+    }
+
+    return false
   } catch {
     return false
   }

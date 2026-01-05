@@ -10,6 +10,10 @@ import cors from 'cors'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { DyeArraySchema, LocaleDataSchema } from './schemas.js'
+import { validateBody } from './middleware/validation.js'
+import { requireAuth, sessionManager } from './middleware/auth.js'
+import { validateBasePaths, validateFilePath } from './utils/pathValidation.js'
 
 // ============================================================================
 // SECURITY: Production Environment Guard
@@ -26,46 +30,23 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
-app.use(cors())
+
+// SECURITY: Restrict CORS to localhost only
+app.use(
+  cors({
+    origin: 'http://localhost:5174',
+    credentials: false,
+  })
+)
+
 app.use(express.json({ limit: '10mb' }))
 
 // ============================================================================
-// SECURITY: API Key Authentication Middleware
+// SECURITY: Authentication Middleware
 // ============================================================================
-const API_KEY = process.env.MAINTAINER_API_KEY
-
-/**
- * Middleware to require API key for mutation (POST/PUT/DELETE) requests
- */
-function requireApiKey(req: Request, res: Response, next: NextFunction): void {
-  // Skip authentication for GET requests (read-only)
-  if (req.method === 'GET') {
-    next()
-    return
-  }
-
-  // Require API key for mutations
-  if (!API_KEY) {
-    console.warn('⚠️  WARNING: MAINTAINER_API_KEY not set. Write operations disabled.')
-    res.status(503).json({
-      success: false,
-      error: 'Service not configured. Set MAINTAINER_API_KEY environment variable.',
-    })
-    return
-  }
-
-  const providedKey = req.headers['x-api-key']
-  if (providedKey !== API_KEY) {
-    console.warn(`🚫 Unauthorized API request to ${req.method} ${req.path}`)
-    res.status(401).json({ success: false, error: 'Unauthorized' })
-    return
-  }
-
-  next()
-}
-
-// Apply API key middleware to all /api routes
-app.use('/api', requireApiKey)
+// Apply session-based authentication to all /api routes
+// (Mutation operations require valid session token or API key)
+app.use('/api', requireAuth)
 
 // Path to xivdyetools-core (sibling directory)
 const CORE_PATH = path.resolve(__dirname, '../../xivdyetools-core')
@@ -91,6 +72,12 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', corePath: CORE_PATH })
 })
 
+// POST /api/auth/session - Create new session token
+app.post('/api/auth/session', (req, res) => {
+  const token = sessionManager.generateSession()
+  res.json({ success: true, token })
+})
+
 // GET /api/colors - Read colors_xiv.json
 app.get('/api/colors', async (req, res) => {
   try {
@@ -103,7 +90,8 @@ app.get('/api/colors', async (req, res) => {
 })
 
 // POST /api/colors - Write colors_xiv.json
-app.post('/api/colors', async (req, res) => {
+// SECURITY: Input validation with Zod schema
+app.post('/api/colors', validateBody(DyeArraySchema), async (req, res) => {
   try {
     await writeJsonFile(COLORS_PATH, req.body)
     res.json({ success: true })
@@ -124,6 +112,12 @@ app.get('/api/locale/:code', async (req, res) => {
 
   try {
     const filePath = path.join(LOCALES_PATH, `${code}.json`)
+
+    // SECURITY: Validate path doesn't escape LOCALES_PATH
+    if (!validateFilePath(filePath, LOCALES_PATH)) {
+      return res.status(400).json({ success: false, error: 'Invalid file path' })
+    }
+
     const data = await readJsonFile(filePath)
     res.json(data)
   } catch (error) {
@@ -133,7 +127,8 @@ app.get('/api/locale/:code', async (req, res) => {
 })
 
 // POST /api/locale/:code - Write locale JSON file
-app.post('/api/locale/:code', async (req, res) => {
+// SECURITY: Input validation with Zod schema
+app.post('/api/locale/:code', validateBody(LocaleDataSchema), async (req, res) => {
   const { code } = req.params
   const validCodes = ['en', 'ja', 'de', 'fr', 'ko', 'zh']
 
@@ -143,6 +138,12 @@ app.post('/api/locale/:code', async (req, res) => {
 
   try {
     const filePath = path.join(LOCALES_PATH, `${code}.json`)
+
+    // SECURITY: Validate path doesn't escape LOCALES_PATH
+    if (!validateFilePath(filePath, LOCALES_PATH)) {
+      return res.status(400).json({ success: false, error: 'Invalid file path' })
+    }
+
     await writeJsonFile(filePath, req.body)
     res.json({ success: true })
   } catch (error) {
@@ -187,13 +188,26 @@ app.get('/api/locales/labels', async (req, res) => {
   }
 })
 
-app.listen(PORT, () => {
-  console.log(`
+// ============================================================================
+// SECURITY: Startup Path Validation & Server Launch
+// ============================================================================
+// Validate paths before starting server
+validateBasePaths(CORE_PATH, COLORS_PATH, LOCALES_PATH)
+  .then(() => {
+    // SECURITY: Bind to 127.0.0.1 only (localhost, not accessible from network)
+    app.listen(PORT, '127.0.0.1', () => {
+      console.log(`
 ╔══════════════════════════════════════════════════════╗
 ║  XIV Dye Tools - Maintainer API Server               ║
 ╠══════════════════════════════════════════════════════╣
-║  Server running at: http://localhost:${PORT}            ║
+║  Server running at: http://127.0.0.1:${PORT}            ║
+║  Bound to: 127.0.0.1 (localhost only)                ║
 ║  Core path: ${CORE_PATH.slice(-40).padStart(40)}  ║
 ╚══════════════════════════════════════════════════════╝
-  `)
-})
+      `)
+    })
+  })
+  .catch((error) => {
+    console.error('❌ Failed to start server:', error)
+    process.exit(1)
+  })
