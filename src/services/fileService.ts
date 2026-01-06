@@ -40,7 +40,7 @@ async function getSessionToken(): Promise<string> {
 
     const data = await response.json()
     sessionToken = data.token
-    return sessionToken
+    return sessionToken!
   } catch (error) {
     console.error('Failed to get session token:', error)
     throw error
