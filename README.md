@@ -32,6 +32,22 @@ This will start:
 - **Frontend**: http://localhost:5174 (Vite dev server)
 - **Backend**: http://localhost:3001 (Express file server)
 
+### Custom Port Configuration
+
+The backend runs on port 3001 by default. To use a different port, set the `PORT` environment variable:
+
+```bash
+PORT=4000 npm run dev:server
+```
+
+Or add it to your `.env` file:
+
+```bash
+PORT=4000
+```
+
+**Note:** If you change the backend port, you'll need to update the frontend's API base URL in `src/services/fileService.ts` accordingly.
+
 ## Usage
 
 1. **Enter Item ID**: Get the Item ID from [Universalis](https://universalis.app) or [XIVAPI](https://v2.xivapi.com)

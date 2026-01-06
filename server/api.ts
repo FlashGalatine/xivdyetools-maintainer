@@ -16,6 +16,10 @@ import { requireAuth, sessionManager } from './middleware/auth.js'
 import { validateBasePaths, validateFilePath } from './utils/pathValidation.js'
 import { globalLimiter, writeLimiter, sessionLimiter } from './middleware/rateLimiting.js'
 import { requestTimeout } from './middleware/timeout.js'
+import { requestLogger } from './middleware/requestLogger.js'
+import { Logger } from './utils/logger.js'
+import { globalErrorHandler, notFoundHandler } from './middleware/errorHandler.js'
+import { validateContentType } from './middleware/contentType.js'
 
 // ============================================================================
 // SECURITY: Production Environment Guard
@@ -40,6 +44,13 @@ const app = express()
 app.use(requestTimeout)
 
 // ============================================================================
+// SECURITY: Request Logging Middleware
+// ============================================================================
+// Apply request logging EARLY for full request lifecycle tracking
+// Generates unique request ID for log correlation and audit trail
+app.use(requestLogger)
+
+// ============================================================================
 // SECURITY: Global Rate Limiting
 // ============================================================================
 // Apply global rate limiter to all endpoints (1000 requests / 15 minutes)
@@ -52,6 +63,13 @@ app.use(
     credentials: false,
   })
 )
+
+// ============================================================================
+// SECURITY: Content-Type Validation
+// ============================================================================
+// Validate Content-Type for mutation operations BEFORE parsing JSON
+// Prevents MIME confusion attacks and ensures proper request format
+app.use(validateContentType)
 
 app.use(express.json({ limit: '10mb' }))
 
@@ -67,7 +85,8 @@ const CORE_PATH = path.resolve(__dirname, '../../xivdyetools-core')
 const COLORS_PATH = path.join(CORE_PATH, 'src/data/colors_xiv.json')
 const LOCALES_PATH = path.join(CORE_PATH, 'src/data/locales')
 
-const PORT = 3001
+// Server configuration
+const PORT = parseInt(process.env.PORT || '3001', 10)
 
 // Utility to read JSON file
 async function readJsonFile<T>(filePath: string): Promise<T> {
@@ -82,8 +101,10 @@ async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
 }
 
 // Health check
+// SECURITY: Does not expose corePath to prevent information disclosure
+// Path validation happens at startup (see validateBasePaths below)
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', corePath: CORE_PATH })
+  res.json({ status: 'ok' })
 })
 
 // POST /api/auth/session - Create new session token
@@ -99,7 +120,13 @@ app.get('/api/colors', async (req, res) => {
     const data = await readJsonFile(COLORS_PATH)
     res.json(data)
   } catch (error) {
-    console.error('Error reading colors file:', error)
+    Logger.error('Error reading colors file', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      error: error instanceof Error ? error.message : String(error),
+      ip: req.ip,
+    })
     res.status(500).json({ success: false, error: 'Failed to read colors file' })
   }
 })
@@ -112,7 +139,13 @@ app.post('/api/colors', writeLimiter, validateBody(DyeArraySchema), async (req, 
     await writeJsonFile(COLORS_PATH, req.body)
     res.json({ success: true })
   } catch (error) {
-    console.error('Error writing colors file:', error)
+    Logger.error('Error writing colors file', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      error: error instanceof Error ? error.message : String(error),
+      ip: req.ip,
+    })
     res.status(500).json({ success: false, error: 'Failed to write colors file' })
   }
 })
@@ -137,7 +170,14 @@ app.get('/api/locale/:code', async (req, res) => {
     const data = await readJsonFile(filePath)
     res.json(data)
   } catch (error) {
-    console.error(`Error reading locale file ${code}:`, error)
+    Logger.error('Error reading locale file', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      localeCode: code,
+      error: error instanceof Error ? error.message : String(error),
+      ip: req.ip,
+    })
     res.status(500).json({ success: false, error: `Failed to read locale file: ${code}` })
   }
 })
@@ -164,7 +204,14 @@ app.post('/api/locale/:code', writeLimiter, validateBody(LocaleDataSchema), asyn
     await writeJsonFile(filePath, req.body)
     res.json({ success: true })
   } catch (error) {
-    console.error(`Error writing locale file ${code}:`, error)
+    Logger.error('Error writing locale file', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      localeCode: code,
+      error: error instanceof Error ? error.message : String(error),
+      ip: req.ip,
+    })
     res.status(500).json({ success: false, error: `Failed to write locale file: ${code}` })
   }
 })
@@ -181,7 +228,14 @@ app.get('/api/validate/:itemId', async (req, res) => {
     const exists = dyes.some((dye) => dye.itemID === itemId)
     res.json({ exists })
   } catch (error) {
-    console.error('Error validating item ID:', error)
+    Logger.error('Error validating item ID', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      itemId: req.params.itemId,
+      error: error instanceof Error ? error.message : String(error),
+      ip: req.ip,
+    })
     res.status(500).json({ success: false, error: 'Failed to validate item ID' })
   }
 })
@@ -200,10 +254,26 @@ app.get('/api/locales/labels', async (req, res) => {
 
     res.json(labels)
   } catch (error) {
-    console.error('Error reading locale labels:', error)
+    Logger.error('Error reading locale labels', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      error: error instanceof Error ? error.message : String(error),
+      ip: req.ip,
+    })
     res.status(500).json({ success: false, error: 'Failed to read locale labels' })
   }
 })
+
+// ============================================================================
+// SECURITY: Error Handling Middleware (MUST BE LAST)
+// ============================================================================
+// 404 handler for undefined routes
+app.use(notFoundHandler)
+
+// Global error handler catches unhandled exceptions
+// SECURITY: Logs full error server-side, returns generic message to client
+app.use(globalErrorHandler)
 
 // ============================================================================
 // SECURITY: Startup Path Validation & Server Launch
